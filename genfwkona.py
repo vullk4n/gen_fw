@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from re import search
 
 class Version:
@@ -42,11 +44,24 @@ class Entry:
         self.type = "HIDL" if "@" in fqname else "AIDL"
 
         if self.type == "HIDL":
+            if "::" not in fqname:
+                raise ValueError(f"Invalid HIDL format: {fqname}")
             self.name, version = fqname.split("::")[0].split("@")
-            interface_name, interface_instance = fqname.split("::")[1].split("/", 1)
+            interface_part = fqname.split("::")[1]
+            if "/" in interface_part:
+                interface_name, interface_instance = interface_part.split("/", 1)
+            else:
+                interface_name = interface_part
+                interface_instance = "default"
         else:
+            if "." not in fqname:
+                raise ValueError(f"Invalid AIDL format: {fqname}")
             self.name, interface_str = fqname.rsplit(".", 1)
-            interface_name, interface_instance = interface_str.split("/")
+            if "/" in interface_str:
+                interface_name, interface_instance = interface_str.split("/")
+            else:
+                interface_name = interface_str
+                interface_instance = "default"
 
         if self.type == "HIDL":
             version = Version(version)
@@ -100,15 +115,27 @@ def main():
         if fqname == "" or fqname[0] == '#':
             continue
 
-        versioned_aidl_match = search(" \(@[0-9]+\)$", fqname)
+        if fqname.endswith(('.xml', '.txt', '.zip', '.pkg')):
+            print(f"Warning: Skipping file name (not a FQN): {fqname}")
+            continue
+            
+        if not ("::" in fqname or fqname.count(".") >= 2):
+            print(f"Warning: Skipping line that doesn't look like a FQN: {fqname}")
+            continue
+
+        versioned_aidl_match = search(r" \(@[0-9]+\)$", fqname)
         if versioned_aidl_match:
             fqname = fqname.removesuffix(versioned_aidl_match.group(0))
 
-        entry = Entry(fqname)
-        if entry.name in entries:
-            entries[entry.name].merge_entry(entry)
-        else:
-            entries[entry.name] = entry
+        try:
+            entry = Entry(fqname)
+            if entry.name in entries:
+                entries[entry.name].merge_entry(entry)
+            else:
+                entries[entry.name] = entry
+        except (ValueError, IndexError) as e:
+            print(f"Warning: Skipping invalid FQN '{fqname}': {e}")
+            continue
 
     fcms = [entry.format() for entry in entries.values()]
 
